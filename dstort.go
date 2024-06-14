@@ -29,7 +29,8 @@ const (
 	license_text = `Copyright (C) 2024 Tomás Gutiérrez L. (0x00)
 License GPLv3: GNU GPL version 3 <https://gnu.org/licenses/gpl.html>.
 This is free software: you are free to change and redistribute it.
-This program comes with ABSOLUTELY NO WARRANTY.`
+This program comes with ABSOLUTELY NO WARRANTY.
+`
 )
 
 var directories []string
