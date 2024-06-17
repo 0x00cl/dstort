@@ -20,7 +20,7 @@ go build
 ## Usage
 
 ```bash
-$ ./dstort.sh /home/user/directory
+$ ./dstort /home/user/directory
 ```
 
 ### Example
