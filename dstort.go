@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const (
@@ -61,7 +62,27 @@ func list_files_and_directories(dir string) {
 
 }
 
+const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+func generateRandomName(originalName string) string {
+	ext := filepath.Ext(originalName)
+
+	// Determine a random length for the base name (e.g., 8 to 12 characters)
+	// rand.Intn(max - min + 1) + min
+	nameLength := rand.Intn(12-8+1) + 8
+
+	randomBaseName := make([]byte, nameLength)
+	for i := range randomBaseName {
+		randomBaseName[i] = charset[rand.Intn(len(charset))]
+	}
+
+	return string(randomBaseName) + ext
+}
+
 func main() {
+	// Seed the random number generator
+	rand.Seed(time.Now().UnixNano())
+
 	version_flag := flag.Bool("v", false, "Print the version number.")
 	help_flag := flag.Bool("h", false, "Print this help message.")
 
@@ -87,16 +108,129 @@ func main() {
 	directories = append(directories, dir)
 	list_files_and_directories(dir)
 
-	for _, file := range files {
+	// Move files to random directories
+	for i, file := range files {
 		filename := filepath.Base(file)
-		os.Rename(file, directories[rand.Intn(len(directories))]+"/"+filename)
+		newPath := filepath.Join(directories[rand.Intn(len(directories))], filename)
+		err := os.Rename(file, newPath)
+		if err == nil {
+			files[i] = newPath // Update path in slice for subsequent renaming
+		} else {
+			fmt.Printf("Error moving file %s to %s: %v\n", file, newPath, err)
+		}
 	}
 
-	for i := 1; i < len(directories); i++ {
-		dst := directories[rand.Intn(len(directories))] + "/" + filepath.Base(directories[i])
-		err := os.Rename(directories[i], dst)
+	// File Renaming Loop
+	for i, oldFilePath := range files {
+		dirPath := filepath.Dir(oldFilePath)
+		originalFileName := filepath.Base(oldFilePath)
+		newBaseName := generateRandomName(originalFileName)
+		newFilePath := filepath.Join(dirPath, newBaseName)
+
+		// Collision Check
+		if _, statErr := os.Stat(newFilePath); !os.IsNotExist(statErr) {
+			// Attempt to resolve collision by appending a random number
+			fmt.Printf("File rename collision: %s already exists. Trying to append random number.\n", newFilePath)
+			newBaseName = generateRandomName(originalFileName[:len(originalFileName)-len(filepath.Ext(originalFileName))] + "_" + fmt.Sprintf("%d", rand.Intn(100))) + filepath.Ext(originalFileName)
+			newFilePath = filepath.Join(dirPath, newBaseName)
+			if _, statErr2 := os.Stat(newFilePath); !os.IsNotExist(statErr2) {
+				fmt.Printf("File rename collision still exists for %s. Skipping rename for %s.\n", newFilePath, oldFilePath)
+				continue // Skip if new path still exists
+			}
+		}
+
+		err := os.Rename(oldFilePath, newFilePath)
 		if err == nil {
-			directories[i] = dst
+			files[i] = newFilePath
+		} else {
+			fmt.Printf("Error renaming file %s to %s: %v\n", oldFilePath, newFilePath, err)
+		}
+	}
+
+	// Directory Moving Loop
+	for i := 1; i < len(directories); i++ { // Start from 1 to skip the root
+		oldDirPath := directories[i]
+		dirName := filepath.Base(oldDirPath)
+		
+		// Prevent moving a directory into itself or its current location by ensuring destination is different
+		// and not a subdirectory of itself (more complex check, simplified here)
+		var newParentDir string
+		attempts := 0
+		for attempts < len(directories) { // Try to find a suitable parent
+			potentialParentIndex := rand.Intn(len(directories))
+			potentialParentDir := directories[potentialParentIndex]
+			// Check if potential parent is not the directory itself or a subdirectory of the directory being moved
+			// This is a simplified check. A full check would be `strings.HasPrefix(potentialParentDir, oldDirPath)`.
+			if filepath.Clean(oldDirPath) != filepath.Clean(potentialParentDir) && !strings.HasPrefix(filepath.Clean(potentialParentDir), filepath.Clean(oldDirPath)) {
+				newParentDir = potentialParentDir
+				break
+			}
+			attempts++
+		}
+
+		if newParentDir == "" {
+			fmt.Printf("Could not find a suitable new parent for directory %s. Skipping move.\n", oldDirPath)
+			continue
+		}
+
+		newDirPath := filepath.Join(newParentDir, dirName)
+		
+		err := os.Rename(oldDirPath, newDirPath)
+		if err == nil {
+			// Update all affected paths in directories and files slices
+			for j, d := range directories {
+				if strings.HasPrefix(d, oldDirPath+string(os.PathSeparator)) {
+					directories[j] = filepath.Join(newDirPath, strings.TrimPrefix(d, oldDirPath))
+				}
+			}
+			directories[i] = newDirPath // Update the path of the moved directory itself
+
+			for j, f := range files {
+				if strings.HasPrefix(f, oldDirPath+string(os.PathSeparator)) {
+					files[j] = filepath.Join(newDirPath, strings.TrimPrefix(f, oldDirPath))
+				}
+			}
+		} else {
+			fmt.Printf("Error moving directory %s to %s: %v\n", oldDirPath, newDirPath, err)
+		}
+	}
+
+	// Directory Renaming Loop
+	for i := 1; i < len(directories); i++ { // Start from 1 to skip the root
+		oldDirPath := directories[i]
+		parentDir := filepath.Dir(oldDirPath)
+		originalDirName := filepath.Base(oldDirPath)
+		newBaseDirName := generateRandomName(originalDirName)
+		newDirPath := filepath.Join(parentDir, newBaseDirName)
+
+		// Collision Check
+		if _, statErr := os.Stat(newDirPath); !os.IsNotExist(statErr) {
+			fmt.Printf("Directory rename collision: %s already exists. Trying to append random number.\n", newDirPath)
+			newBaseDirName = generateRandomName(originalDirName + "_" + fmt.Sprintf("%d", rand.Intn(100)))
+			newDirPath = filepath.Join(parentDir, newBaseDirName)
+			if _, statErr2 := os.Stat(newDirPath); !os.IsNotExist(statErr2) {
+				fmt.Printf("Directory rename collision still exists for %s. Skipping rename for %s.\n", newDirPath, oldDirPath)
+				continue
+			}
+		}
+
+		err := os.Rename(oldDirPath, newDirPath)
+		if err == nil {
+			// Update all affected paths in directories and files slices
+			for j, d := range directories {
+				if strings.HasPrefix(d, oldDirPath+string(os.PathSeparator)) {
+					directories[j] = filepath.Join(newDirPath, strings.TrimPrefix(d, oldDirPath))
+				}
+			}
+			directories[i] = newDirPath // Update the path of the renamed directory itself
+
+			for j, f := range files {
+				if strings.HasPrefix(f, oldDirPath+string(os.PathSeparator)) {
+					files[j] = filepath.Join(newDirPath, strings.TrimPrefix(f, oldDirPath))
+				}
+			}
+		} else {
+			fmt.Printf("Error renaming directory %s to %s: %v\n", oldDirPath, newDirPath, err)
 		}
 	}
 }
